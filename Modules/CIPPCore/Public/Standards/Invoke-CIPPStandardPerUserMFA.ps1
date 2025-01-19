@@ -23,7 +23,7 @@ function Invoke-CIPPStandardPerUserMFA {
         UPDATECOMMENTBLOCK
             Run the Tools\Update-StandardsComments.ps1 script to update this comment block
     .LINK
-        https://docs.cipp.app/user-documentation/tenant/standards/edit-standards
+        https://docs.cipp.app/user-documentation/tenant/standards/list-standards/entra-aad-standards#high-impact
     #>
 
     param($Tenant, $Settings)
@@ -39,10 +39,14 @@ function Invoke-CIPPStandardPerUserMFA {
             url    = "/users/$id/authentication/requirements"
         }
     }
-    $UsersWithoutMFA = (New-GraphBulkRequest -tenantid $tenant -Requests @($Requests) -asapp $true).body | Where-Object { $_.perUserMfaState -ne 'enforced' } | Select-Object peruserMFAState, @{Name = 'userPrincipalName'; Expression = { [System.Web.HttpUtility]::UrlDecode($_.'@odata.context'.split("'")[1]) } }
+    if ($Requests) {
+        $UsersWithoutMFA = (New-GraphBulkRequest -tenantid $tenant -Requests @($Requests) -asapp $true).body | Where-Object { $_.perUserMfaState -ne 'enforced' } | Select-Object peruserMFAState, @{Name = 'userPrincipalName'; Expression = { [System.Web.HttpUtility]::UrlDecode($_.'@odata.context'.split("'")[1]) } }
+    } else {
+        $UsersWithoutMFA = @()
+    }
 
     If ($Settings.remediate -eq $true) {
-        if (($UsersWithoutMFA.userPrincipalName | Measure-Object).Count -gt 0) {
+        if (($UsersWithoutMFA | Measure-Object).Count -gt 0) {
             try {
                 $MFAMessage = Set-CIPPPerUserMFA -TenantFilter $Tenant -userId @($UsersWithoutMFA.userPrincipalName) -State 'enforced'
                 Write-LogMessage -API 'Standards' -tenant $tenant -message $MFAMessage -sev Info
