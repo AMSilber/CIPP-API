@@ -21,6 +21,7 @@ function Test-CIPPAuditLogRules {
         'SAS:ProcessAuth'
         'deviceAuth:ReprocessTls'
         'Consent:Set'
+        'Login:reprocess'
     )
 
     $TrustedIPTable = Get-CIPPTable -TableName 'trustedIps'
@@ -28,18 +29,26 @@ function Test-CIPPAuditLogRules {
     $ConfigEntries = Get-CIPPAzDataTableEntity @ConfigTable
     $Configuration = $ConfigEntries | Where-Object { ($_.Tenants -match $TenantFilter -or $_.Tenants -match 'AllTenants') } | ForEach-Object {
         [pscustomobject]@{
-            Tenants    = ($_.Tenants | ConvertFrom-Json).fullValue
+            Tenants    = ($_.Tenants | ConvertFrom-Json)
             Conditions = $_.Conditions
             Actions    = $_.Actions
             LogType    = $_.Type
         }
     }
     #write-warning 'Getting audit records from Graph API'
-    $SearchResults = Get-CippAuditLogSearchResults -TenantFilter $TenantFilter -QueryId $SearchId
-    $LogCount = ($SearchResults | Measure-Object).Count
-    $RunGuid = New-Guid
-    Write-Warning "Logs to process: $LogCount - RunGuid: $($RunGuid) - $($TenantFilter)"
-    $Results.TotalLogs = $LogCount
+    try {
+        $LogCount = Get-CippAuditLogSearchResults -TenantFilter $TenantFilter -QueryId $SearchId -CountOnly
+        $RunGuid = (New-Guid).Guid
+        Write-Warning "Logs to process: $LogCount - SearchId: $SearchId - RunGuid: $($RunGuid) - $($TenantFilter)"
+        $Results.TotalLogs = $LogCount
+        Write-Information "RunGuid: $RunGud - Collecting logs"
+        $SearchResults = Get-CippAuditLogSearchResults -TenantFilter $TenantFilter -QueryId $SearchId
+    } catch {
+        Write-Warning "Error getting audit logs: $($_.Exception.Message)"
+        Write-LogMessage -API 'Webhooks' -message "Error getting audit logs for search $($SearchId)" -LogData (Get-CippException -Exception $_) -sev Error -tenant $TenantFilter
+        throw $_
+    }
+
     if ($LogCount -gt 0) {
         $LocationTable = Get-CIPPTable -TableName 'knownlocationdb'
         $ProcessedData = foreach ($AuditRecord in $SearchResults) {
@@ -83,7 +92,7 @@ function Test-CIPPAuditLogRules {
                         $Data.clientip = $Data.clientip -replace ':\d+$', '' # Remove the port number if present
                     }
                     # Check if IP is on trusted IP list
-                    $TrustedIP = Get-CIPPAzDataTableEntity @TrustedIPTable -Filter "PartitionKey eq '$TenantFilter' and RowKey eq '$($Data.clientip)' and state eq 'Trusted'"
+                    $TrustedIP = Get-CIPPAzDataTableEntity @TrustedIPTable -Filter "((PartitionKey eq '$TenantFilter') or (PartitionKey eq 'AllTenants'))  and RowKey eq '$($Data.clientip)'  and state eq 'Trusted'"
                     if ($TrustedIP) {
                         #write-warning "IP $($Data.clientip) is trusted"
                         $Trusted = $true
