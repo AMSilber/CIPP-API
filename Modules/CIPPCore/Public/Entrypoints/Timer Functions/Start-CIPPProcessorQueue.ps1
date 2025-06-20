@@ -10,14 +10,28 @@ function Start-CIPPProcessorQueue {
     $QueueItems = Get-CIPPAzDataTableEntity @QueueTable -Filter "PartitionKey eq 'Function'"
 
     foreach ($QueueItem in $QueueItems) {
-        if ($PSCmdlet.ShouldProcess("Processing function $($QueueItem.ProcessorFunction)")) {
-            Remove-AzDataTableEntity @QueueTable -Entity $QueueItem
-            $Parameters = $QueueItem.Parameters | ConvertFrom-Json -AsHashtable
-            if (Get-Command -Name $QueueItem.FunctionName -Module CIPPCore -ErrorAction SilentlyContinue) {
-                & $QueueItem.FunctionName @Parameters
+        $FunctionName = $QueueItem.FunctionName ?? $QueueItem.RowKey
+        if ($PSCmdlet.ShouldProcess("Processing function $($FunctionName)")) {
+            Write-Information "Running queued function $($FunctionName)"
+            if ($QueueItem.Parameters) {
+                try {
+                    $Parameters = $QueueItem.Parameters | ConvertFrom-Json -AsHashtable
+                } catch {
+                    $Parameters = @{}
+                }
             } else {
-                Write-Warning "Function $($QueueItem.FunctionName) not found"
+                $Parameters = @{}
             }
+            if (Get-Command -Name $FunctionName -ErrorAction SilentlyContinue) {
+                try {
+                    Invoke-Command -ScriptBlock { & $FunctionName @Parameters }
+                } catch {
+                    Write-Warning "Failed to run function $($FunctionName). Error: $($_.Exception.Message)"
+                }
+            } else {
+                Write-Warning "Function $($FunctionName) not found"
+            }
+            Remove-AzDataTableEntity -Force @QueueTable -Entity $QueueItem
         }
     }
 }
