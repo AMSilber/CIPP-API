@@ -1,9 +1,9 @@
 function Invoke-ExecDomainAnalyser {
     <#
     .FUNCTIONALITY
-        Entrypoint
+        Entrypoint,AnyTenant
     .ROLE
-        Tenant.DomainAnalyser.Read
+        Tenant.DomainAnalyser.ReadWrite
     #>
     [CmdletBinding()]
     param($Request, $TriggerMetadata)
@@ -14,9 +14,9 @@ function Invoke-ExecDomainAnalyser {
     if ($Config -and $Config.state -eq $true) {
         if ($env:CIPP_PROCESSOR -ne 'true') {
             $ProcessorFunction = [PSCustomObject]@{
-                PartitionKey      = 'Function'
-                RowKey            = 'Start-DomainOrchestrator'
-                ProcessorFunction = 'Start-DomainOrchestrator'
+                PartitionKey = 'Function'
+                RowKey       = 'Start-DomainOrchestrator'
+                FunctionName = 'Start-DomainOrchestrator'
             }
             $ProcessorQueue = Get-CIPPTable -TableName 'ProcessorQueue'
             Add-AzDataTableEntity @ProcessorQueue -Entity $ProcessorFunction -Force
@@ -32,7 +32,7 @@ function Invoke-ExecDomainAnalyser {
         $Results = [pscustomobject]@{'Results' = $Message }
     }
 
-    Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
+    return ([HttpResponseContext]@{
             StatusCode = [HttpStatusCode]::OK
             Body       = $Results
         })
