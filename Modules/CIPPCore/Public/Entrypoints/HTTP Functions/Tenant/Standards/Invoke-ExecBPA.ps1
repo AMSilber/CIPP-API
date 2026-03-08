@@ -1,36 +1,21 @@
 function Invoke-ExecBPA {
     <#
         .FUNCTIONALITY
-        Entrypoint
+        Entrypoint,AnyTenant
         .ROLE
         Tenant.BestPracticeAnalyser.ReadWrite
     #>
     [CmdletBinding()]
     param($Request, $TriggerMetadata)
 
-    $ConfigTable = Get-CIPPTable -tablename Config
-    $Config = Get-CIPPAzDataTableEntity @ConfigTable -Filter "PartitionKey eq 'OffloadFunctions' and RowKey eq 'OffloadFunctions'"
+    $TenantFilter = $Request.Query.tenantFilter ? $Request.Query.tenantFilter.value : $Request.Body.tenantfilter.value
 
-    if ($Config -and $Config.state -eq $true) {
-        if ($env:CIPP_PROCESSOR -ne 'true') {
-            $ProcessorQueue = Get-CIPPTable -TableName 'ProcessorQueue'
-            $ProcessorFunction = [PSCustomObject]@{
-                PartitionKey = 'Function'
-                RowKey       = "Start-BPAOrchestrator-$($Request.Query.TenantFilter)"
-                FunctionName = 'Start-BPAOrchestrator'
-                Parameters   = [string](ConvertTo-Json -Compress -InputObject @{
-                        TenantFilter = $Request.Query.TenantFilter
-                    })
-            }
-            Add-AzDataTableEntity @ProcessorQueue -Entity $ProcessorFunction -Force
-            $Results = [pscustomobject]@{'Results' = 'BPA queued for execution' }
-        }
-    } else {
-        Start-BPAOrchestrator -TenantFilter $Request.Query.TenantFilter
-        $Results = [pscustomobject]@{'Results' = 'BPA started' }
-    }
+    # Start the orchestrator - it will handle queuing internally
+    Start-BPAOrchestrator -TenantFilter $TenantFilter -Force
 
-    Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
+    $Results = [pscustomobject]@{'Results' = 'BPA queued for execution' }
+
+    return ([HttpResponseContext]@{
             StatusCode = [HttpStatusCode]::OK
             Body       = $Results
         })
